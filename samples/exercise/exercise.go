@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"time"
 
@@ -27,48 +28,42 @@ func main() {
 	zone := os.Args[1]
 	recs, _ := provider.GetRecords(ctx, zone)
 	for _, r := range recs {
-		fmt.Println("found", r.Name, r.Type, r.Value)
+		switch rec := r.(type) {
+		case libdns.Address:
+			fmt.Printf("Address Record - Name: %s, IP: %s, TTL: %s\n", rec.Name, rec.IP, rec.TTL)
+		case libdns.CNAME:
+			fmt.Printf("CNAME Record - Name: %s, Target: %s, TTL: %s\n", rec.Name, rec.Target, rec.TTL)
+		case libdns.TXT:
+			fmt.Printf("TXT Record - Name: %s, Text: %s, TTL: %s\n", rec.Name, rec.Text, rec.TTL)
+		default:
+			fmt.Printf("Unknown Record Type: %T\n", r)
+			fmt.Printf("Record details: %+v\n", r)
+		}
 	}
 	added, err := provider.AppendRecords(ctx, zone, []libdns.Record{
-		{
-			Name:  "test",
-			TTL:   time.Duration(300) * time.Second,
-			Value: "8.8.8.8",
-			Type:  "A",
-		},
+		libdns.Address{Name: "test", TTL: time.Duration(300) * time.Second, IP: netip.MustParseAddr("8.8.8.8")},
 	})
 	if err != nil {
 		fmt.Println(err)
 	}
-	newone := added[0]
-	fmt.Println("New test record's ID", newone.ID)
-	for _, r := range added {
-		fmt.Println("added", r.Name, r.Type, r.Value)
-	}
-	rec := libdns.Record{Name: "todelete", Type: "TXT", Value: "this will go away"}
-	deleted, err := provider.DeleteRecords(ctx, zone, []libdns.Record{rec})
+	fmt.Println("Added record:", added)
+	deleted, err := provider.DeleteRecords(ctx, zone, []libdns.Record{
+		libdns.TXT{Name: "todelete", Text: "this will go away"},
+	})
 	if err != nil {
 		fmt.Println(err)
 	}
-	for _, r := range deleted {
-		fmt.Println("deleted", r.Name, r.Type, r.Value)
-	}
+	fmt.Println("Deleted record:", deleted)
+
+	// Test SetRecords functionality
 	updated, err := provider.SetRecords(ctx, zone, []libdns.Record{
-		{
-			ID:    newone.ID,
-			Value: "1.2.3.4",
-		},
-		{
-			Name:  "additional",
-			TTL:   3600,
-			Value: "google.com.",
-			Type:  "CNAME",
-		},
+		libdns.Address{Name: "test", TTL: time.Duration(600) * time.Second, IP: netip.MustParseAddr("1.1.1.1")},
+		libdns.CNAME{Name: "alias", TTL: time.Duration(600) * time.Second, Target: "test"},
+		libdns.TXT{Name: "example", TTL: time.Duration(600) * time.Second, Text: "sample text"},
 	})
 	if err != nil {
-		fmt.Println(err)
-	}
-	for _, r := range updated {
-		fmt.Println("updated", r.Name, r.Type, r.Value)
+		fmt.Println("Error in SetRecords:", err)
+	} else {
+		fmt.Println("Updated records:", updated)
 	}
 }

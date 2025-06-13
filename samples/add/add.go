@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"time"
 
@@ -28,17 +29,21 @@ func main() {
 	name := os.Args[2]
 	rtype := os.Args[3]
 	value := os.Args[4]
-	added, err := provider.AppendRecords(ctx, zone, []libdns.Record{
-		{
-			Name:  name,
-			TTL:   time.Duration(3600) * time.Second,
-			Value: value,
-			Type:  rtype,
-		},
-	})
+	var record libdns.Record
+	switch rtype {
+	case "A":
+		record = libdns.Address{Name: name, TTL: time.Duration(3600) * time.Second, IP: netip.MustParseAddr(value)}
+	case "CNAME":
+		record = libdns.CNAME{Name: name, TTL: time.Duration(3600) * time.Second, Target: value}
+	case "TXT":
+		record = libdns.TXT{Name: name, TTL: time.Duration(3600) * time.Second, Text: value}
+	default:
+		fmt.Println("Unsupported record type")
+		os.Exit(1)
+	}
+	added, err := provider.AppendRecords(ctx, zone, []libdns.Record{record})
 	if err != nil {
 		fmt.Println(err)
 	}
-	newone := added[0]
-	fmt.Println("Reference:", newone.ID)
+	fmt.Println("Added record:", added)
 }

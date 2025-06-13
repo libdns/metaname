@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -79,14 +80,31 @@ func (p *Provider) update_dns_record(ctx context.Context, zone string, reference
 
 	fqdn := strings.TrimRight(zone, ".")
 
-	params := []interface{}{fqdn, reference, record}
+	// Define a new struct for the API payload
+	type updatePayload struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+		Ttl  int    `json:"ttl"`
+		Data string `json:"data"`
+	}
+
+	// Convert metanameRR to updatePayload
+	payload := updatePayload{
+		Name: record.Name,
+		Type: record.Type,
+		Ttl:  record.Ttl,
+		Data: record.Data,
+	}
+
+	// Update the params to use the new payload
+	params := []interface{}{fqdn, reference, payload}
 	var result metanameResponse
 	if err := p.makeRPCRequest(ctx, "update_dns_record", params, &result); err != nil {
 		return err
 	}
 	if result.Error.Code < 0 {
 		errData, _ := json.Marshal(result.Error.Data)
-		return fmt.Errorf("Metaname error from update_dns_record: %s (%s)", result.Error.Message, string(errData))
+		return fmt.Errorf("metaname error from update_dns_record: %s (%s)", result.Error.Message, string(errData))
 	}
 	return nil
 }
@@ -105,7 +123,7 @@ func (p *Provider) delete_dns_record(ctx context.Context, zone string, reference
 	}
 	if result.Result == nil {
 		errData, _ := json.Marshal(result.Error.Data)
-		return false, fmt.Errorf("Metaname error from delete_dns_record: %s (%s)", result.Error.Message, string(errData))
+		return false, fmt.Errorf("metaname error from delete_dns_record: %s (%s)", result.Error.Message, string(errData))
 	}
 	return true, nil
 
@@ -138,7 +156,10 @@ func (p *Provider) makeRPCRequest(ctx context.Context, method string, params []i
 		return fmt.Errorf("error performing http request")
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	// Log the raw response body
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if err := json.NewDecoder(bytes.NewReader(respBody)).Decode(&response); err != nil {
 		return fmt.Errorf("error decoding JSON: %s", err)
 	}
 

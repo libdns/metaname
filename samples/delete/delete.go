@@ -10,8 +10,8 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: ", os.Args[0], "<zone>", "<reference>")
+	if len(os.Args) < 4 {
+		fmt.Println("Usage: ", os.Args[0], "<zone>", "<name>", "<value>")
 		os.Exit(1)
 	}
 	ctx := context.TODO()
@@ -24,10 +24,13 @@ func main() {
 		AccountReference: os.Getenv("account_reference"),
 		Endpoint:         endpoint}
 	zone := os.Args[1]
-	_, err := provider.DeleteRecords(ctx, zone, []libdns.Record{
-		{ID: os.Args[2]},
+	name := os.Args[2]
+	value := os.Args[3]
+	deleted, err := provider.DeleteRecords(ctx, zone, []libdns.Record{
+		libdns.TXT{Name: name, Text: value}, // Example: Adjust based on the record type
 	})
 	if err != nil {
 		fmt.Println(err)
 	}
+	fmt.Println("Deleted record:", deleted)
 }

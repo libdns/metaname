@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/libdns/libdns"
 	"github.com/libdns/metaname"
 )
 
@@ -28,7 +29,15 @@ func main() {
 		fmt.Println(err)
 	}
 	for _, r := range recs {
-		fmt.Println(r.ID, r.Name, r.Type, r.Value)
+		switch rec := r.(type) {
+		case libdns.Address:
+			fmt.Printf("Address Record - Name: %s, IP: %s, TTL: %s\n", rec.Name, rec.IP, rec.TTL)
+		case libdns.CNAME:
+			fmt.Printf("CNAME Record - Name: %s, Target: %s, TTL: %s\n", rec.Name, rec.Target, rec.TTL)
+		case libdns.TXT:
+			fmt.Printf("TXT Record - Name: %s, Text: %s, TTL: %s\n", rec.Name, rec.Text, rec.TTL)
+		default:
+			fmt.Printf("Unknown Record Type: %T\n", r)
+		}
 	}
-
 }
