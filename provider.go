@@ -47,6 +47,16 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 				TTL:  time.Duration(rec.Ttl) * time.Second,
 				IP:   ip,
 			})
+		case "AAAA":
+			ip, err := netip.ParseAddr(rec.Data)
+			if err != nil {
+				continue // Skip invalid IP addresses
+			}
+			libRecords = append(libRecords, libdns.Address{
+				Name: rec.Name,
+				TTL:  time.Duration(rec.Ttl) * time.Second,
+				IP:   ip,
+			})
 		case "CNAME":
 			libRecords = append(libRecords, libdns.CNAME{
 				Name:   rec.Name,
@@ -71,11 +81,19 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 func (p *Provider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
 	var added []libdns.Record
 	for _, rec := range records {
-		switch r := rec.(type) {
+		rr := rec.RR()
+		parsed, err := rr.Parse()
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse record: %w", err)
+		}
+		if parsed == nil {
+			return nil, fmt.Errorf("record is nil after parsing: %v", rec)
+		}
+		switch r := parsed.(type) {
 		case libdns.Address:
 			mrec := metanameRR{
 				Name: r.Name,
-				Type: "A",
+				Type: rr.Type,
 				Ttl:  int(r.TTL.Seconds()),
 				Data: r.IP.String(),
 			}
@@ -135,17 +153,16 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 	// Create a map of input records by (type, name) pair
 	inputMap := make(map[string]libdns.Record)
 	for _, rec := range records {
-		switch r := rec.(type) {
-		case libdns.Address:
-			key := r.Name + "|A"
-			inputMap[key] = rec
-		case libdns.CNAME:
-			key := r.Name + "|CNAME"
-			inputMap[key] = rec
-		case libdns.TXT:
-			key := r.Name + "|TXT"
-			inputMap[key] = rec
+		rr := rec.RR()
+		parsed, err := rr.Parse()
+		key := rr.Name + "|" + rr.Type
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse record: %w", err)
 		}
+		if parsed == nil {
+			return nil, fmt.Errorf("record is nil after parsing: %v", rec)
+		}
+		inputMap[key] = parsed
 	}
 
 	// Use a map to track records already added to the updated slice
@@ -159,7 +176,7 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 				// Update the existing record if it does not match the input record
 				switch r := inputRec.(type) {
 				case libdns.Address:
-					metanameRec := metanameRR{Name: r.Name, Ttl: int(r.TTL.Seconds()), Type: "A", Data: r.IP.String()}
+					metanameRec := metanameRR{Name: r.Name, Ttl: int(r.TTL.Seconds()), Type: r.RR().Type, Data: r.IP.String()}
 					if err := p.update_dns_record(ctx, zone, existing.Reference, metanameRec); err != nil {
 						return nil, err
 					}
@@ -184,7 +201,7 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 			// Create the record if it does not exist
 			switch r := inputRec.(type) {
 			case libdns.Address:
-				metanameRec := metanameRR{Name: r.Name, Ttl: int(r.TTL.Seconds()), Type: "A", Data: r.IP.String()}
+				metanameRec := metanameRR{Name: r.Name, Ttl: int(r.TTL.Seconds()), Type: r.RR().Type, Data: r.IP.String()}
 				_, err := p.create_dns_record(ctx, zone, metanameRec)
 				if err != nil {
 					return nil, err
@@ -225,10 +242,18 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 
 	// Iterate over the records to delete
 	for _, rec := range records {
-		switch r := rec.(type) {
+		rr := rec.RR()
+		parsed, err := rr.Parse()
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse record: %w", err)
+		}
+		if parsed == nil {
+			return nil, fmt.Errorf("record is nil after parsing: %v", rec)
+		}
+		switch r := parsed.(type) {
 		case libdns.Address:
 			for _, raw := range rawRecords {
-				if raw.Name == r.Name && raw.Type == "A" && raw.Data == r.IP.String() {
+				if raw.Name == r.Name && raw.Type == rr.Type && raw.Data == r.IP.String() {
 					_, err := p.delete_dns_record(ctx, zone, raw.Reference)
 					if err != nil {
 						return deleted, err
@@ -247,10 +272,6 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 				}
 			}
 		case libdns.TXT:
-			// Validate TXT record: ensure Name and Text fields are populated
-			if r.Name == "" || r.Text == "" {
-				return nil, fmt.Errorf("invalid TXT record: missing required fields")
-			}
 			for _, raw := range rawRecords {
 				if raw.Name == r.Name && raw.Type == "TXT" && raw.Data == r.Text {
 					_, err := p.delete_dns_record(ctx, zone, raw.Reference)
@@ -278,7 +299,10 @@ var (
 func recordsMatch(existing metanameRR, input libdns.Record) bool {
 	switch r := input.(type) {
 	case libdns.Address:
-		return existing.Type == "A" && existing.Name == r.Name && existing.Ttl == int(r.TTL.Seconds()) && existing.Data == r.IP.String()
+		if existing.Type != input.RR().Type {
+			return false
+		}
+		return existing.Name == r.Name && existing.Ttl == int(r.TTL.Seconds()) && existing.Data == r.IP.String()
 	case libdns.CNAME:
 		return existing.Type == "CNAME" && existing.Name == r.Name && existing.Ttl == int(r.TTL.Seconds()) && existing.Data == r.Target
 	case libdns.TXT:
